@@ -27,7 +27,7 @@ func (p postgres) escapeSingleQuote(n string) string {
 
 // Open :
 func (p *postgres) Open(conf Config) (*sql.DB, error) {
-	buf := new(bytes.Buffer)
+	buf := new(strings.Builder)
 	buf.WriteString(fmt.Sprintf("user='%s' ", p.escapeSingleQuote(conf.Username)))
 	buf.WriteString(fmt.Sprintf("password='%s' ", p.escapeSingleQuote(conf.Password)))
 	if conf.UnixSocket != "" {
@@ -127,7 +127,7 @@ func (p postgres) FilterJSON(f Filter) (string, []interface{}, error) {
 			x = append(x, vv)
 		}
 		if len(x) <= 0 {
-			return "", nil, fmt.Errorf(`goloquent: value for "In" operator cannot be empty`)
+			return "", nil, fmt.Errorf(`value for "In" operator cannot be empty`)
 		}
 		buf.WriteString("(")
 		for i := 0; i < len(x); i++ {
@@ -143,7 +143,7 @@ func (p postgres) FilterJSON(f Filter) (string, []interface{}, error) {
 			x = append(x, vv)
 		}
 		if len(x) <= 0 {
-			return "", nil, fmt.Errorf(`goloquent: value for "In" operator cannot be empty`)
+			return "", nil, fmt.Errorf(`value for "In" operator cannot be empty`)
 		}
 		buf.WriteString("(")
 		for i := 0; i < len(x); i++ {
@@ -159,7 +159,7 @@ func (p postgres) FilterJSON(f Filter) (string, []interface{}, error) {
 			x = append(x, vv)
 		}
 		if len(x) <= 0 {
-			return "", nil, fmt.Errorf(`goloquent: value for "In" operator cannot be empty`)
+			return "", nil, fmt.Errorf(`value for "In" operator cannot be empty`)
 		}
 		buf.WriteString(fmt.Sprintf("%s ?| array[", name))
 		for i := 0; i < len(x); i++ {
@@ -229,7 +229,7 @@ func (p postgres) OnConflictUpdate(table string, cols []string) string {
 	return buf.String()
 }
 
-func (p postgres) GetSchema(c Column) []Schema {
+func (p postgres) GetSchema(c Column) Schema {
 	f := c.field
 	root := f.getRoot()
 	t := root.typeOf
@@ -247,15 +247,15 @@ func (p postgres) GetSchema(c Column) []Schema {
 	if t.Kind() == reflect.Ptr {
 		sc.IsNullable = true
 		if t == typeOfPtrKey {
-			if f.name == keyFieldName {
-				return []Schema{
-					Schema{pkColumn, fmt.Sprintf("varchar(%d)", pkLen), OmitDefault(nil), false, false, false, latin1CharSet},
-				}
-			}
 			sc.IsIndexed = true
 			sc.DataType = fmt.Sprintf("varchar(%d)", pkLen)
 			sc.CharSet = latin1CharSet
-			return []Schema{sc}
+			if f.name == keyFieldName {
+				sc.Name = pkColumn
+				sc.DefaultValue = OmitDefault(nil)
+				sc.IsIndexed = false
+			}
+			return sc
 		}
 		t = t.Elem()
 	}
@@ -333,7 +333,7 @@ func (p postgres) GetSchema(c Column) []Schema {
 		}
 	}
 
-	return []Schema{sc}
+	return sc
 }
 
 // GetColumns :
@@ -411,17 +411,16 @@ func (p *postgres) CreateTable(table string, columns []Column) error {
 	buf := new(bytes.Buffer)
 	buf.WriteString(fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (", p.GetTable(table)))
 	for _, c := range columns {
-		for _, ss := range p.GetSchema(c) {
-			buf.WriteString(fmt.Sprintf("%s %s,",
-				p.Quote(ss.Name),
-				p.DataType(ss)))
+		ss := p.GetSchema(c)
+		buf.WriteString(fmt.Sprintf("%s %s,",
+			p.Quote(ss.Name),
+			p.DataType(ss)))
 
-			if ss.IsIndexed {
-				idx := fmt.Sprintf("%s_%s_%s", table, ss.Name, "Idx")
-				stmt := fmt.Sprintf("CREATE INDEX %s ON %s (%s);",
-					p.Quote(idx), p.GetTable(table), p.Quote(ss.Name))
-				idxs = append(idxs, stmt)
-			}
+		if ss.IsIndexed {
+			idx := fmt.Sprintf("%s_%s_%s", table, ss.Name, "Idx")
+			stmt := fmt.Sprintf("CREATE INDEX %s ON %s (%s);",
+				p.Quote(idx), p.GetTable(table), p.Quote(ss.Name))
+			idxs = append(idxs, stmt)
 		}
 	}
 	buf.WriteString(fmt.Sprintf("PRIMARY KEY (%s)", p.Quote(pkColumn)))
@@ -447,44 +446,44 @@ func (p *postgres) AlterTable(table string, columns []Column) error {
 	buf := new(bytes.Buffer)
 	buf.WriteString(fmt.Sprintf("ALTER TABLE %s ", p.GetTable(table)))
 	for _, c := range columns {
-		for _, ss := range p.GetSchema(c) {
-			if !cols.has(ss.Name) {
-				buf.WriteString(fmt.Sprintf("ADD COLUMN %s %s", p.Quote(ss.Name), ss.DataType))
-				if !ss.IsNullable {
-					buf.WriteString(" NOT NULL")
-					if !ss.IsOmitEmpty() {
-						buf.WriteString(fmt.Sprintf(" DEFAULT %s",
-							p.ToString(ss.DefaultValue)))
-					}
-				}
-				buf.WriteString(",")
-			} else {
-				prefix := fmt.Sprintf("ALTER COLUMN %s", p.Quote(ss.Name))
-				buf.WriteString(fmt.Sprintf("%s TYPE %s", prefix, ss.DataType))
-				buf.WriteString(",")
-				if !ss.IsNullable {
-					buf.WriteString(prefix + " SET NOT NULL,")
-					if !ss.IsOmitEmpty() {
-						buf.WriteString(fmt.Sprintf("%s SET DEFAULT %s,",
-							prefix, p.ToString(ss.DefaultValue)))
-					}
+		ss := p.GetSchema(c)
+		if !cols.has(ss.Name) {
+			buf.WriteString(fmt.Sprintf("ADD COLUMN %s %s", p.Quote(ss.Name), ss.DataType))
+			if !ss.IsNullable {
+				buf.WriteString(" NOT NULL")
+				if !ss.IsOmitEmpty() {
+					buf.WriteString(fmt.Sprintf(" DEFAULT %s",
+						p.ToString(ss.DefaultValue)))
 				}
 			}
-
-			if ss.IsIndexed {
-				idx := fmt.Sprintf("%s_%s_%s", table, ss.Name, "idx")
-				if idxs.has(idx) {
-					idxs.delete(idx)
-				} else {
-
-					// buf.WriteString(fmt.Sprintf(
-					// 	" CREATE INDEX %s ON (%s);",
-					// 	p.Quote(idx),
-					// 	p.Quote(ss.Name)))
+			buf.WriteString(",")
+		} else {
+			prefix := fmt.Sprintf("ALTER COLUMN %s", p.Quote(ss.Name))
+			buf.WriteString(fmt.Sprintf("%s TYPE %s", prefix, ss.DataType))
+			buf.WriteString(",")
+			if !ss.IsNullable {
+				buf.WriteString(prefix + " SET NOT NULL,")
+				if !ss.IsOmitEmpty() {
+					buf.WriteString(fmt.Sprintf("%s SET DEFAULT %s,",
+						prefix, p.ToString(ss.DefaultValue)))
 				}
 			}
-			cols.delete(ss.Name)
 		}
+
+		if ss.IsIndexed {
+			idx := fmt.Sprintf("%s_%s_%s", table, ss.Name, "idx")
+			if idxs.has(idx) {
+				idxs.delete(idx)
+			} else {
+
+				// buf.WriteString(fmt.Sprintf(
+				// 	" CREATE INDEX %s ON (%s);",
+				// 	p.Quote(idx),
+				// 	p.Quote(ss.Name)))
+			}
+		}
+		cols.delete(ss.Name)
+
 	}
 
 	for _, col := range cols.keys() {
@@ -494,9 +493,8 @@ func (p *postgres) AlterTable(table string, columns []Column) error {
 	buf.Truncate(buf.Len() - 1)
 	buf.WriteString(";")
 
-	log.Println(idxs.keys())
-	return p.db.execStmt(&stmt{
-		statement: buf,
+	return p.db.ExecStmt(&Stmt{
+		query: buf,
 	})
 
 	// for _, idx := range idxs.keys() {
@@ -520,26 +518,38 @@ func (p *postgres) ReplaceInto(src, dst string) error {
 	cols := p.GetColumns(src)
 	pk := p.Quote(pkColumn)
 	src, dst = p.GetTable(src), p.GetTable(dst)
+
 	buf := new(bytes.Buffer)
 	buf.WriteString("WITH patch AS (")
-	buf.WriteString("UPDATE " + dst + " SET ")
+	buf.WriteString("UPDATE ")
+	buf.WriteString(dst)
+	buf.WriteString(" SET ")
+
 	for _, c := range cols {
 		if c == pkColumn {
 			continue
 		}
 		cc := p.Quote(c)
-		buf.WriteString(cc + " = " + src + "." + cc + ",")
+		buf.WriteString(cc)
+		buf.WriteString(" = ")
+		buf.WriteString(src + "." + cc)
+		buf.WriteString(",")
 	}
+
 	buf.Truncate(buf.Len() - 1)
-	buf.WriteString(" FROM " + src + " ")
-	buf.WriteString("WHERE " + src + "." + pk + " = " + dst + "." + pk + " ")
+	buf.WriteString(" FROM ")
+	buf.WriteString(src)
+	buf.WriteString(" WHERE " + src + "." + pk + " = " + dst + "." + pk + " ")
 	buf.WriteString("RETURNING " + src + "." + pk + ") ")
-	buf.WriteString("INSERT INTO " + dst + " ")
-	buf.WriteString("SELECT * FROM " + src + " ")
-	buf.WriteString("WHERE NOT EXISTS ")
+	buf.WriteString("INSERT INTO ")
+	buf.WriteString(dst)
+	buf.WriteString(" SELECT * FROM ")
+	buf.WriteString(src)
+	buf.WriteString(" WHERE NOT EXISTS ")
 	buf.WriteString("(SELECT 1 FROM patch WHERE " + pk + " = " + src + "." + pk + ")")
 	buf.WriteString(";")
-	return p.db.execStmt(&stmt{
-		statement: buf,
+
+	return p.db.ExecStmt(&Stmt{
+		query: buf,
 	})
 }

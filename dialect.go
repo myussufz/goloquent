@@ -18,7 +18,7 @@ type Dialect interface {
 	FilterJSON(f Filter) (s string, args []interface{}, err error)
 	JSONMarshal(i interface{}) (b json.RawMessage)
 	Value(v interface{}) string
-	GetSchema(c Column) []Schema
+	GetSchema(c Column) Schema
 	DataType(s Schema) string
 	HasTable(tb string) bool
 	HasIndex(tb, idx string) bool

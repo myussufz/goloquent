@@ -25,6 +25,10 @@ This repo still under development. We accept any pull request. ^\_^
   import "github.com/si3nloong/goloquent"
 ```
 
+## Go Support
+
+At least 1.10, because we use `strings.Builder` and `sync.Map`.
+
 ## Quick Start
 
 ### Connect to database

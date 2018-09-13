@@ -34,18 +34,18 @@
   <!-- - (2018-09-10) Fix `Upsert` bug. Primary key should omitted. -->
 - (2018-09-10) Fix `postgres` schema bug. Schema for unsigned integer should be greater and equal to zero instead of greater than zero. `CHECK (value >= 0)`.
 
-# Breaking Changes / Changes
+# Breaking Changes
 
-- Drop function `Count`
-- Drop function `Union`
-- Drop function single `Update`
-- Drop function `SetDebug(boolean)`
-- Drop datastore support
-- `Delete` function using entity model instead of `*datastore.Key`
+- Drop `Count` api.
+- Drop `Union` api.
+- Drop single `Update` api.
+- Drop `SetDebug(boolean)` api.
+- Drop `datastore` driver support.
+- `Delete` api using entity model instead of `*datastore.Key`.
 - Rename params in function `RunInTransaction` from `*goloquent.Connection` to `*goloquent.DB`
-- Rename function `LockForUpdate` to `WLock`
-- Rename function `LockForShared` to `RLock`
-- Change function single entity `Update` to `Save`
+- Rename api `LockForUpdate` to `WLock`.
+- Rename api `LockForShared` to `RLock`.
+- Change single entity api `Update` to `Save`.
 - Change `Loader` interface `Load([]datastore.Property) error` to `Load() error`
 - Change `Saver` interface `Save() ([]datastore.Property,error)` to `Save() error`
 - Change second parameter **parentKey** `*datastore.Key` to optional on function `Create` nor `Upsert`
@@ -53,15 +53,15 @@
 - (2018-06-19) Table is now by default using `utf8mb4` encoding
 - (2018-06-20) Replace `Next` func in `Pagination` struct with `NextCursor`
 - (2018-06-21) Support extra option `datatype`, `charset`, `collate` on struct property, but it only limited to datatype of `string`
-- (2018-06-21) Allow `*` on func `Select`
+- (2018-06-21) Allow `*` on api `Select`.
 - (2018-06-24) Replace offset pagination with cursor pagination
-- (2018-07-05) Rename `WhereNe` with `WhereNotEqual`.
-- (2018-07-08) Rename `WhereEq` with `WhereEqual`.
-- (2018-07-08) Replace return parameter `Query` to `Table` on func `Table` of `goloquent.DB`
+- (2018-07-05) Rename api `WhereNe` to `WhereNotEqual`.
+- (2018-07-08) Rename api `WhereEq` to `WhereEqual`.
+- (2018-07-08) Replace return parameter `Query` to `Table` on func `Table` of `goloquent.DB`.
 - (2018-07-17) Expose operator to public.
-- (2018-08-24) Change api `AnyOfAncestor` params data type from `[]*datastore.Key` to `...*datastore.Key`.
+- (2018-08-24) Change `AnyOfAncestor` api parameter data type `[]*datastore.Key` to `...*datastore.Key`.
 - (2018-08-24) Change `Truncate` api to support multiple entity.
-- (2018-08-24) Increase maximum limit of `Pagination` to `10000`.
+- (2018-08-24) Increase maximum limit of `Pagination` api to `10000`.
 - (2018-09-02) Change api `WhereIn` and `WhereNotIn` value param from `[]interface{}` to `interface{}`.
 - (2018-09-10) `Date` no longer convert to UTC before format.
 - (2018-09-10) `Date` will have default value `"0001-01-01"` if it's not pointer.

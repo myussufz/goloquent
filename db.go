@@ -1,10 +1,10 @@
 package goloquent
 
 import (
-	"bytes"
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"reflect"
 	"strings"
 	"time"
@@ -80,69 +80,7 @@ func (c Client) consoleLog(s *Stmt) {
 	}
 }
 
-func (c *Client) compileStmt(query string, args ...interface{}) *Stmt {
-	buf := new(bytes.Buffer)
-	buf.WriteString(query)
-	ss := &Stmt{
-		stmt: stmt{
-			statement: buf,
-			arguments: args,
-		},
-		replacer: c.dialect,
-	}
-	return ss
-}
-
-func (c Client) execStmt(s *stmt) error {
-	ss := &Stmt{
-		stmt:     *s,
-		replacer: c.dialect,
-	}
-	ss.startTrace()
-	defer func() {
-		ss.stopTrace()
-		c.consoleLog(ss)
-	}()
-	result, err := c.PrepareExec(ss.Raw(), ss.arguments...)
-	if err != nil {
-		return err
-	}
-	ss.Result = result
-	return nil
-}
-
-func (c Client) execQuery(s *stmt) (*sql.Rows, error) {
-	ss := &Stmt{
-		stmt:     *s,
-		replacer: c.dialect,
-	}
-	ss.startTrace()
-	defer func() {
-		ss.stopTrace()
-		c.consoleLog(ss)
-	}()
-	var rows, err = c.Query(ss.Raw(), ss.arguments...)
-	if err != nil {
-		return nil, err
-	}
-	return rows, nil
-}
-
-func (c *Client) execQueryRow(s *stmt) *sql.Row {
-	ss := &Stmt{
-		stmt:     *s,
-		replacer: c.dialect,
-	}
-	ss.startTrace()
-	defer func() {
-		ss.stopTrace()
-		c.consoleLog(ss)
-	}()
-	return c.QueryRow(ss.Raw(), ss.arguments...)
-}
-
-// PrepareExec :
-func (c Client) PrepareExec(query string, args ...interface{}) (sql.Result, error) {
+func (c Client) prepareExec(query string, args ...interface{}) (sql.Result, error) {
 	conn, err := c.sqlCommon.Prepare(query)
 	if err != nil {
 		return nil, fmt.Errorf("goloquent: unable to prepare sql statement : %v", err)
@@ -153,6 +91,48 @@ func (c Client) PrepareExec(query string, args ...interface{}) (sql.Result, erro
 		return nil, fmt.Errorf("goloquent: %v", err)
 	}
 	return result, nil
+}
+
+// ExecStmt :
+func (c Client) ExecStmt(s *Stmt) error {
+	s.startTrace()
+	defer func() {
+		s.stopTrace()
+		//c.consoleLog(s)
+	}()
+	log.Println(s.Raw())
+	result, err := c.prepareExec(s.Raw(), s.Args()...)
+	if err != nil {
+		return err
+	}
+	s.Result = result
+	return nil
+}
+
+// QueryStmt :
+func (c Client) QueryStmt(stmt *Stmt) (*sql.Rows, error) {
+	stmt.startTrace()
+	defer func() {
+		stmt.stopTrace()
+		// c.consoleLog(ss)
+	}()
+	log.Println(stmt.Raw())
+	var rows, err = c.Query(stmt.Raw(), stmt.Args()...)
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// QueryRowStmt :
+func (c *Client) QueryRowStmt(stmt *Stmt) *sql.Row {
+	stmt.startTrace()
+	defer func() {
+		stmt.stopTrace()
+		// c.consoleLog(ss)
+	}()
+	log.Println(stmt.Raw())
+	return c.QueryRow(stmt.Raw(), stmt.Args()...)
 }
 
 // Exec :

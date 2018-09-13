@@ -7,32 +7,43 @@ import (
 	"time"
 )
 
-type stmt struct {
-	statement *bytes.Buffer
-	arguments []interface{}
-}
+// type stmt struct {
+// 	statement *bytes.Buffer
+// 	arguments []interface{}
+// }
 
-func (s stmt) string() string {
-	return s.statement.String()
-}
+// func (s stmt) string() string {
+// 	return s.statement.String()
+// }
 
-func (s stmt) isZero() bool {
-	return !(s.statement.Len() > 0)
-}
+// func (s stmt) isZero() bool {
+// 	return !(s.statement.Len() > 0)
+// }
 
 type replacer interface {
 	Bind(uint) string
 	Value(interface{}) string
 }
 
+type writer interface {
+	WriteString(string) (int, error)
+	String() string
+	Len() int
+}
+
 // Stmt :
 type Stmt struct {
-	stmt
+	query     writer
+	args      []interface{}
 	crud      string
 	replacer  replacer
 	startTime time.Time
 	endTime   time.Time
 	Result    sql.Result
+}
+
+func (s Stmt) isZero() bool {
+	return !(s.query.Len() > 0)
 }
 
 func (s *Stmt) startTrace() {
@@ -50,26 +61,32 @@ func (s Stmt) TimeElapse() time.Duration {
 
 // Raw :
 func (s *Stmt) Raw() string {
-	buf := new(bytes.Buffer)
-	if len(s.arguments) <= 0 {
-		return s.string()
-	}
-	arr := strings.Split(s.string(), variable)
-	for i := 0; i < len(arr); i++ {
-		str := arr[i] + s.replacer.Bind(uint(i+1))
-		if i >= len(arr)-1 {
-			str = arr[i]
-		}
-		buf.WriteString(str)
-	}
-	return buf.String()
+	return s.query.String()
 }
+
+// Raw :
+// func (s *Stmt) Raw() string {
+// 	buf := new(bytes.Buffer)
+// 	if len(s.arguments) <= 0 {
+// 		return s.string()
+// 	}
+// 	arr := strings.Split(s.string(), variable)
+// 	for i := 0; i < len(arr); i++ {
+// 		str := arr[i] + s.replacer.Bind(uint(i+1))
+// 		if i >= len(arr)-1 {
+// 			str = arr[i]
+// 		}
+// 		buf.WriteString(str)
+// 	}
+// 	return buf.String()
+// 	return buf.String()
+// }
 
 // String :
 func (s *Stmt) String() string {
 	buf := new(bytes.Buffer)
-	arr := strings.Split(s.string(), variable)
-	for i, aa := range s.arguments {
+	arr := strings.Split(s.query.String(), variable)
+	for i, aa := range s.args {
 		str := arr[i] + s.replacer.Value(aa)
 		buf.WriteString(str)
 	}
@@ -77,7 +94,7 @@ func (s *Stmt) String() string {
 	return buf.String()
 }
 
-// Arguments :
-func (s Stmt) Arguments() []interface{} {
-	return s.arguments
+// Args :
+func (s Stmt) Args() []interface{} {
+	return s.args
 }

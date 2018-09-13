@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -25,7 +26,7 @@ func init() {
 
 // Open :
 func (s *mysql) Open(conf Config) (*sql.DB, error) {
-	addr, buf := "@", new(bytes.Buffer)
+	addr, buf := "@", new(strings.Builder)
 	buf.WriteString(conf.Username + ":" + conf.Password)
 	if conf.UnixSocket != "" {
 		addr += fmt.Sprintf("unix(%s)", conf.UnixSocket)
@@ -105,64 +106,102 @@ func (s mysql) OnConflictUpdate(table string, cols []string) string {
 }
 
 func (s mysql) CreateTable(table string, columns []Column) error {
-	buf := new(bytes.Buffer)
-	buf.WriteString(fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (", s.GetTable(table)))
-	for _, c := range columns {
-		for _, ss := range s.GetSchema(c) {
-			buf.WriteString(fmt.Sprintf("%s %s,", s.Quote(ss.Name), s.DataType(ss)))
-			if ss.IsIndexed {
-				idx := fmt.Sprintf("%s_%s_%s", table, ss.Name, "Idx")
-				buf.WriteString(fmt.Sprintf("INDEX %s (%s),", s.Quote(idx), s.Quote(ss.Name)))
-			}
+	buf := new(strings.Builder)
+	buf.WriteString("CREATE TABLE IF NOT EXISTS ")
+	buf.WriteString(s.GetTable(table))
+	buf.WriteString(" (")
+
+	for _, col := range columns {
+		schema := s.GetSchema(col)
+		buf.WriteString(s.Quote(schema.Name))
+		buf.WriteString(" ")
+		buf.WriteString(s.DataType(schema))
+		buf.WriteString(",")
+		if schema.IsIndexed {
+			idx := fmt.Sprintf("%s_%s_%s", table, schema.Name, "Idx")
+			buf.WriteString("INDEX ")
+			buf.WriteString(s.Quote(idx))
+			buf.WriteString(" (")
+			buf.WriteString(s.Quote(schema.Name))
+			buf.WriteString(")")
+			buf.WriteString(",")
 		}
 	}
-	buf.WriteString(fmt.Sprintf("PRIMARY KEY (%s)", s.Quote(pkColumn)))
-	buf.WriteString(fmt.Sprintf(") ENGINE=InnoDB DEFAULT CHARSET=%s COLLATE=%s;",
-		s.Quote(s.db.CharSet.Encoding), s.Quote(s.db.CharSet.Collation)))
-	return s.db.execStmt(&stmt{statement: buf})
+
+	buf.WriteString("PRIMARY KEY (")
+	buf.WriteString(s.Quote(pkColumn))
+	buf.WriteString(")")
+	buf.WriteString(") ENGINE=InnoDB DEFAULT CHARSET=")
+	buf.WriteString(s.Quote(s.db.CharSet.Encoding))
+	buf.WriteString(" COLLATE=")
+	buf.WriteString(s.Quote(s.db.CharSet.Collation))
+	buf.WriteString(";")
+
+	return s.db.ExecStmt(&Stmt{
+		query: buf,
+	})
 }
 
 func (s *mysql) AlterTable(table string, columns []Column) error {
 	cols := newDictionary(s.GetColumns(table))
 	idxs := newDictionary(s.GetIndexes(table))
 
-	buf := new(bytes.Buffer)
-	buf.WriteString(fmt.Sprintf("ALTER TABLE %s ", s.GetTable(table)))
-	suffix := "FIRST"
-	for _, c := range columns {
-		for _, ss := range s.GetSchema(c) {
-			action := "ADD"
-			if cols.has(ss.Name) {
-				action = "MODIFY"
-			}
-			buf.WriteString(fmt.Sprintf("%s %s %s %s,",
-				action, s.Quote(ss.Name), s.DataType(ss), suffix))
-			suffix = fmt.Sprintf("AFTER %s", s.Quote(ss.Name))
+	buf := new(strings.Builder)
+	buf.WriteString("ALTER TABLE ")
+	buf.WriteString(s.GetTable(table))
+	buf.WriteString(" ")
 
-			if ss.IsIndexed {
-				idx := fmt.Sprintf("%s_%s_%s", table, ss.Name, "idx")
-				if idxs.has(idx) {
-					idxs.delete(idx)
-				} else {
-					buf.WriteString(fmt.Sprintf(" ADD INDEX %s (%s),",
-						s.Quote(idx), s.Quote(ss.Name)))
-				}
-			}
-			cols.delete(ss.Name)
+	suffix := "FIRST"
+	for _, col := range columns {
+		schema := s.GetSchema(col)
+		action := "ADD"
+		if cols.has(schema.Name) {
+			action = "MODIFY"
 		}
+
+		buf.WriteString(action)
+		buf.WriteString(" ")
+		buf.WriteString(s.Quote(schema.Name))
+		buf.WriteString(" ")
+		buf.WriteString(s.DataType(schema))
+		buf.WriteString(" ")
+		buf.WriteString(suffix)
+		buf.WriteString(",")
+
+		if schema.IsIndexed {
+			idx := fmt.Sprintf("%s_%s_%s", table, schema.Name, "idx")
+			if idxs.has(idx) {
+				idxs.delete(idx)
+			} else {
+				buf.WriteString(fmt.Sprintf(" ADD INDEX %s (%s),",
+					s.Quote(idx), s.Quote(schema.Name)))
+			}
+		}
+		suffix = fmt.Sprintf("AFTER %s", s.Quote(schema.Name))
+		cols.delete(schema.Name)
 	}
 
 	for _, col := range cols.keys() {
-		buf.WriteString(fmt.Sprintf("DROP COLUMN %s,", s.Quote(col)))
-	}
-	for _, idx := range idxs.keys() {
-		buf.WriteString(fmt.Sprintf("DROP INDEX %s,", s.Quote(idx)))
+		buf.WriteString("DROP COLUMN ")
+		buf.WriteString(s.Quote(col))
+		buf.WriteString(", ")
 	}
 
-	buf.WriteString(fmt.Sprintf("CHARACTER SET %s ", s.Quote(s.db.CharSet.Encoding)))
-	buf.WriteString(fmt.Sprintf("COLLATE %s", s.Quote(s.db.CharSet.Collation)))
+	for _, idx := range idxs.keys() {
+		buf.WriteString("DROP INDEX ")
+		buf.WriteString(s.Quote(idx))
+		buf.WriteString(", ")
+	}
+
+	buf.WriteString("CHARACTER SET ")
+	buf.WriteString(s.Quote(s.db.CharSet.Encoding))
+	buf.WriteString("COLLATE ")
+	buf.WriteString(s.Quote(s.db.CharSet.Collation))
 	buf.WriteString(";")
-	return s.db.execStmt(&stmt{statement: buf})
+
+	return s.db.ExecStmt(&Stmt{
+		query: buf,
+	})
 }
 
 func (s mysql) ToString(it interface{}) string {
@@ -201,13 +240,13 @@ func (s mysql) UpdateWithLimit() bool {
 
 func (s mysql) ReplaceInto(src, dst string) error {
 	src, dst = s.GetTable(src), s.GetTable(dst)
-	buf := new(bytes.Buffer)
+	buf := new(strings.Builder)
 	buf.WriteString("REPLACE INTO ")
-	buf.WriteString(dst + " ")
-	buf.WriteString("SELECT * FROM ")
+	buf.WriteString(dst)
+	buf.WriteString(" SELECT * FROM ")
 	buf.WriteString(src)
 	buf.WriteString(";")
-	return s.db.execStmt(&stmt{
-		statement: buf,
+	return s.db.ExecStmt(&Stmt{
+		query: buf,
 	})
 }

@@ -16,14 +16,14 @@ import (
 )
 
 const (
-	variable      = "??"
+	variable      = "?"
 	jsonDelimeter = ":"
 )
 
-type index int
+type indexType int
 
 const (
-	bTreeIdx index = iota
+	bTreeIdx indexType = iota
 	uniqueIdx
 )
 
@@ -40,12 +40,19 @@ func newBuilder(query *Query) *builder {
 	}
 }
 
-func (b *builder) addIndex(fields []string, idx index) error {
+func (b *builder) quoteIfNecessary(v string) string {
+	if regexp.MustCompile("^[\\$a-zA-Z\\d]+(\\.[a-zA-Z\\d]+)*$").MatchString(v) {
+		return b.db.dialect.Quote(v)
+	}
+	return v
+}
+
+func (b *builder) addIndex(fields []string, idxType indexType) error {
 	table := b.query.table
-	buf := new(bytes.Buffer)
+	buf := new(strings.Builder)
 	buf.WriteString("CREATE")
 	idxName := fmt.Sprintf("%s_%s_idx", table, strings.Join(fields, "_"))
-	switch idx {
+	switch idxType {
 	case uniqueIdx:
 		idxName = fmt.Sprintf("%s_%s_unique", table, strings.Join(fields, "_"))
 		buf.WriteString(" UNIQUE")
@@ -58,27 +65,22 @@ func (b *builder) addIndex(fields []string, idx index) error {
 		b.db.dialect.Quote(idxName),
 		b.db.dialect.GetTable(table),
 		b.db.dialect.Quote(strings.Join(fields, ","))))
-	return b.db.client.execStmt(&stmt{
-		statement: buf,
+	return b.db.client.ExecStmt(&Stmt{
+		query: buf,
 	})
 }
 
 func (b *builder) dropTableIfExists(table string) error {
-	buf := new(bytes.Buffer)
-	buf.WriteString(fmt.Sprintf("DROP TABLE IF EXISTS %s;", b.db.dialect.GetTable(table)))
-	return b.db.client.execStmt(&stmt{
-		statement: buf,
+	buf := new(strings.Builder)
+	buf.WriteString("DROP TABLE IF EXISTS ")
+	buf.WriteString(b.db.dialect.GetTable(table))
+	buf.WriteString(";")
+	return b.db.client.ExecStmt(&Stmt{
+		query: buf,
 	})
 }
 
-func (b *builder) quoteIfNecessary(v string) string {
-	if regexp.MustCompile("^[a-zA-Z\\d]+(\\.[a-zA-Z\\d]+)*$").MatchString(v) {
-		return b.db.dialect.Quote(v)
-	}
-	return v
-}
-
-func (b *builder) buildSelect(query scope) *stmt {
+func (b *builder) buildSelect(query scope) *Stmt {
 	scope := "*"
 	if len(query.projection) > 0 {
 		projection := make([]string, len(query.projection), len(query.projection))
@@ -96,16 +98,16 @@ func (b *builder) buildSelect(query scope) *stmt {
 		}
 		scope = "DISTINCT " + strings.Join(distinctOn, ",")
 	}
-	buf := new(bytes.Buffer)
+	buf := new(strings.Builder)
 	buf.WriteString("SELECT ")
 	buf.WriteString(scope)
-	return &stmt{
-		statement: buf,
+	return &Stmt{
+		query: buf,
 	}
 }
 
-func (b *builder) buildWhere(query scope) (*stmt, error) {
-	buf := new(bytes.Buffer)
+func (b *builder) buildWhere(query scope) (*Stmt, error) {
+	buf := new(strings.Builder)
 	wheres := make([]string, 0)
 	args := make([]interface{}, 0)
 	for _, f := range query.filters {
@@ -118,7 +120,7 @@ func (b *builder) buildWhere(query scope) (*stmt, error) {
 		if f.IsJSON() {
 			str, vv, err := b.db.dialect.FilterJSON(f)
 			if err != nil {
-				return nil, fmt.Errorf("goloquent: %v", err)
+				return nil, err
 			}
 			wheres = append(wheres, str)
 			args = append(args, vv...)
@@ -163,7 +165,7 @@ func (b *builder) buildWhere(query scope) (*stmt, error) {
 				x = append(x, v)
 			}
 			if len(x) <= 0 {
-				return nil, fmt.Errorf(`goloquent: value for "AnyLike" operator cannot be empty`)
+				return nil, fmt.Errorf(`value for "AnyLike" operator cannot be empty`)
 			}
 			buf := new(bytes.Buffer)
 			buf.WriteString("(")
@@ -187,7 +189,7 @@ func (b *builder) buildWhere(query scope) (*stmt, error) {
 				x = append(x, v)
 			}
 			if len(x) <= 0 {
-				return nil, fmt.Errorf(`goloquent: value for "In" operator cannot be empty`)
+				return nil, fmt.Errorf(`value for "In" operator cannot be empty`)
 			}
 			vv = fmt.Sprintf("(%s)", strings.TrimRight(
 				strings.Repeat(variable+",", len(x)), ","))
@@ -201,7 +203,7 @@ func (b *builder) buildWhere(query scope) (*stmt, error) {
 				x = append(x, v)
 			}
 			if len(x) <= 0 {
-				return nil, fmt.Errorf(`goloquent: value for "NotIn" operator cannot be empty`)
+				return nil, fmt.Errorf(`value for "NotIn" operator cannot be empty`)
 			}
 			vv = fmt.Sprintf("(%s)", strings.TrimRight(
 				strings.Repeat(variable+",", len(x)), ","))
@@ -238,65 +240,66 @@ func (b *builder) buildWhere(query scope) (*stmt, error) {
 		buf.Reset()
 	}
 
-	return &stmt{
-		statement: buf,
-		arguments: args,
+	return &Stmt{
+		query: buf,
+		args:  args,
 	}, nil
 }
 
-func (b *builder) buildOrder(query scope) *stmt {
-	buf := new(bytes.Buffer)
+func (b *builder) buildOrder(query scope) *Stmt {
+	buf := new(strings.Builder)
+	arr := make([]string, 0, len(query.orders))
 
-	// __key__ sorting, filter
-	if len(query.orders) > 0 {
-		arr := make([]string, 0, len(query.orders))
-		for _, o := range query.orders {
-			name := b.db.dialect.Quote(o.field)
-			if o.field == keyFieldName {
-				name = b.db.dialect.Quote(pkColumn)
-			}
-			suffix := " ASC"
-			if o.direction != ascending {
-				suffix = " DESC"
-			}
-			arr = append(arr, name+suffix)
+	for _, o := range query.orders {
+		// __key__ sorting, filter
+		name := b.db.dialect.Quote(o.field)
+		if o.field == keyFieldName {
+			name = b.db.dialect.Quote(pkColumn)
 		}
+		suffix := " ASC"
+		if o.direction != ascending {
+			suffix = " DESC"
+		}
+		arr = append(arr, name+suffix)
+	}
+
+	if len(arr) > 0 {
 		buf.WriteString(" ORDER BY " + strings.Join(arr, ","))
 	}
 
-	return &stmt{
-		statement: buf,
+	return &Stmt{
+		query: buf,
 	}
 }
 
-func (b *builder) buildLimitOffset(query scope) *stmt {
-	buf := new(bytes.Buffer)
+func (b *builder) buildLimitOffset(query scope) *Stmt {
+	buf := new(strings.Builder)
 	if query.limit > 0 {
 		buf.WriteString(fmt.Sprintf(" LIMIT %d", query.limit))
 	}
 	if query.offset > 0 {
 		buf.WriteString(fmt.Sprintf(" OFFSET %d", query.offset))
 	}
-	return &stmt{
-		statement: buf,
+	return &Stmt{
+		query: buf,
 	}
 }
 
-func (b *builder) buildStmt(query scope, args ...interface{}) (*stmt, error) {
-	buf := new(bytes.Buffer)
-	cmd, err := b.buildWhere(query)
+func (b *builder) buildStmt(query scope, args ...interface{}) (*Stmt, error) {
+	buf := new(strings.Builder)
+	stmt, err := b.buildWhere(query)
 	if err != nil {
 		return nil, err
 	}
-	if !cmd.isZero() {
-		args = append(args, cmd.arguments...)
-		buf.WriteString(cmd.string())
+	if !stmt.isZero() {
+		args = append(args, stmt.Args()...)
+		buf.WriteString(stmt.Raw())
 	}
-	buf.WriteString(b.buildOrder(query).string())
-	buf.WriteString(b.buildLimitOffset(query).string())
-	return &stmt{
-		statement: buf,
-		arguments: args,
+	buf.WriteString(b.buildOrder(query).Raw())
+	buf.WriteString(b.buildLimitOffset(query).Raw())
+	return &Stmt{
+		query: buf,
+		args:  args,
 	}, nil
 }
 
@@ -327,11 +330,12 @@ func (b *builder) migrate(models []interface{}) error {
 	return nil
 }
 
-func (b *builder) getCommand(e *entity) (*stmt, error) {
+func (b *builder) getStmt(e *entity) (*Stmt, error) {
 	query := b.query
-	buf := new(bytes.Buffer)
-	buf.WriteString(b.buildSelect(query).string())
-	buf.WriteString(fmt.Sprintf(" FROM %s", b.db.dialect.GetTable(e.Name())))
+	buf := new(strings.Builder)
+	buf.WriteString(b.buildSelect(query).Raw())
+	buf.WriteString(" FROM ")
+	buf.WriteString(b.db.dialect.GetTable(e.Name()))
 	if !query.noScope && e.hasSoftDelete() {
 		query.filters = append(query.filters, Filter{
 			field:    softDeleteColumn,
@@ -339,11 +343,11 @@ func (b *builder) getCommand(e *entity) (*stmt, error) {
 			value:    nil,
 		})
 	}
-	cmd, err := b.buildStmt(query)
+	stmt, err := b.buildStmt(query)
 	if err != nil {
 		return nil, err
 	}
-	buf.WriteString(cmd.string())
+	buf.WriteString(stmt.Raw())
 	switch query.lockMode {
 	case ReadLock:
 		buf.WriteString(" LOCK IN SHARE MODE")
@@ -352,14 +356,14 @@ func (b *builder) getCommand(e *entity) (*stmt, error) {
 	}
 	buf.WriteString(";")
 
-	return &stmt{
-		statement: buf,
-		arguments: cmd.arguments,
+	return &Stmt{
+		query: buf,
+		args:  stmt.Args(),
 	}, nil
 }
 
-func (b *builder) run(table string, cmd *stmt) (*Iterator, error) {
-	var rows, err = b.db.client.execQuery(cmd)
+func (b *builder) run(table string, stmt *Stmt) (*Iterator, error) {
+	var rows, err = b.db.client.QueryStmt(stmt)
 	if err != nil {
 		return nil, fmt.Errorf("goloquent: %v", err)
 	}
@@ -371,7 +375,7 @@ func (b *builder) run(table string, cmd *stmt) (*Iterator, error) {
 
 	it := Iterator{
 		table:    table,
-		stmt:     &Stmt{stmt: *cmd, replacer: b.db.dialect},
+		stmt:     &Stmt{replacer: b.db.dialect},
 		position: -1,
 		columns:  cols,
 	}
@@ -403,12 +407,12 @@ func (b *builder) get(model interface{}, mustExist bool) error {
 		return err
 	}
 	e.setName(b.query.table)
-	cmd, err := b.getCommand(e)
+	stmt, err := b.getStmt(e)
 	if err != nil {
 		return err
 	}
 
-	it, err := b.run(e.Name(), cmd)
+	it, err := b.run(e.Name(), stmt)
 	if err != nil {
 		return err
 	}
@@ -437,7 +441,7 @@ func (b *builder) getMulti(model interface{}) error {
 		return err
 	}
 	e.setName(b.query.table)
-	cmd, err := b.getCommand(e)
+	cmd, err := b.getStmt(e)
 	if err != nil {
 		return err
 	}
@@ -481,144 +485,145 @@ func baseToInterface(it interface{}) interface{} {
 }
 
 func (b *builder) paginate(p *Pagination, model interface{}) error {
-	e, err := newEntity(model)
-	if err != nil {
-		return err
-	}
-	e.setName(b.query.table)
-	cmds, err := b.getCommand(e)
-	if err != nil {
-		return err
-	}
+	// e, err := newEntity(model)
+	// if err != nil {
+	// 	return err
+	// }
+	// e.setName(b.query.table)
+	// cmds, err := b.getStmt(e)
+	// if err != nil {
+	// 	return err
+	// }
 
-	oriCmd := *cmds
-	if p.Cursor != "" {
-		c, err := DecodeCursor(p.Cursor)
-		if err != nil {
-			return err
-		}
-		if sha1Sign(&Stmt{stmt: *cmds, replacer: b.db.dialect}) != c.Signature {
-			return ErrInvalidCursor
-		}
-		query := b.query
-		buf, args := new(bytes.Buffer), make([]interface{}, 0)
-		buf.WriteString(b.buildSelect(query).string())
-		buf.WriteString(fmt.Sprintf(" FROM %s", b.db.dialect.GetTable(e.Name())))
-		cmd, err := b.buildWhere(query)
-		if err != nil {
-			return err
-		}
+	// oriCmd := *cmds
+	// if p.Cursor != "" {
+	// 	c, err := DecodeCursor(p.Cursor)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	if sha1Sign(&Stmt{replacer: b.db.dialect}) != c.Signature {
+	// 		return ErrInvalidCursor
+	// 	}
+	// 	query := b.query
+	// 	buf, args := new(bytes.Buffer), make([]interface{}, 0)
+	// 	buf.WriteString(b.buildSelect(query).Raw())
+	// 	buf.WriteString(" FROM ")
+	// 	buf.WriteString(b.db.dialect.GetTable(e.Name()))
+	// 	cmd, err := b.buildWhere(query)
+	// 	if err != nil {
+	// 		return err
+	// 	}
 
-		orders := query.orders
-		projection := make([]string, 0, len(orders))
-		for _, o := range orders {
-			projection = append(projection, o.field)
-		}
-		values, or := make([]interface{}, len(orders)), make([]string, 0)
-		for i := 0; i < len(values); i++ {
-			values[i] = &values[i]
-		}
-		if !cmd.isZero() {
-			args = append(args, cmd.arguments...)
-			buf.WriteString(cmd.string() + " AND ")
-		} else {
-			if len(orders) > 0 {
-				buf.WriteString(" WHERE ")
-			}
-		}
-		if err := b.db.Table(e.Name()).
-			WhereEqual(keyFieldName, c.Key).
-			Select(projection...).
-			Limit(1).Scan(values...); err != nil {
-			return ErrInvalidCursor
-		}
-		arg := make([]interface{}, 0, len(orders))
-		for i, o := range orders {
-			vv := baseToInterface(values[i])
-			op := ">="
-			if o.direction == descending {
-				op = "<="
-			}
-			if i < len(orders)-1 {
-				buf.WriteString(fmt.Sprintf("%s %s %s AND ",
-					b.db.dialect.Quote(o.field), op, variable))
-				args = append(args, vv)
-				op = strings.Trim(op, "=")
-			}
-			or = append(or, fmt.Sprintf("%s %s %s",
-				b.db.dialect.Quote(o.field), op, variable))
-			arg = append(arg, vv)
-		}
-		buf.WriteString("(" + strings.Join(or, " OR ") + ")")
-		args = append(args, arg...)
-		buf.WriteString(b.buildOrder(query).string())
-		buf.WriteString(b.buildLimitOffset(query).string())
-		buf.WriteString(";")
-		cmds = &stmt{statement: buf, arguments: args}
-	}
+	// 	orders := query.orders
+	// 	projection := make([]string, 0, len(orders))
+	// 	for _, o := range orders {
+	// 		projection = append(projection, o.field)
+	// 	}
+	// 	values, or := make([]interface{}, len(orders)), make([]string, 0)
+	// 	for i := 0; i < len(values); i++ {
+	// 		values[i] = &values[i]
+	// 	}
+	// 	if !cmd.isZero() {
+	// 		args = append(args, cmd.Args()...)
+	// 		buf.WriteString(cmd.Raw())
+	// 		buf.WriteString(" AND ")
+	// 	} else {
+	// 		if len(orders) > 0 {
+	// 			buf.WriteString(" WHERE ")
+	// 		}
+	// 	}
+	// 	if err := b.db.Table(e.Name()).
+	// 		WhereEqual(keyFieldName, c.Key).
+	// 		Select(projection...).
+	// 		Limit(1).Scan(values...); err != nil {
+	// 		return ErrInvalidCursor
+	// 	}
+	// 	arg := make([]interface{}, 0, len(orders))
+	// 	for i, o := range orders {
+	// 		vv := baseToInterface(values[i])
+	// 		op := ">="
+	// 		if o.direction == descending {
+	// 			op = "<="
+	// 		}
+	// 		if i < len(orders)-1 {
+	// 			buf.WriteString(fmt.Sprintf("%s %s %s AND ",
+	// 				b.db.dialect.Quote(o.field), op, variable))
+	// 			args = append(args, vv)
+	// 			op = strings.Trim(op, "=")
+	// 		}
+	// 		or = append(or, fmt.Sprintf("%s %s %s",
+	// 			b.db.dialect.Quote(o.field), op, variable))
+	// 		arg = append(arg, vv)
+	// 	}
+	// 	buf.WriteString("(" + strings.Join(or, " OR ") + ")")
+	// 	args = append(args, arg...)
+	// 	buf.WriteString(b.buildOrder(query).Raw())
+	// 	buf.WriteString(b.buildLimitOffset(query).Raw())
+	// 	buf.WriteString(";")
+	// 	// cmds = &stmt{statement: buf, arguments: args}
+	// }
 
-	it, err := b.run(e.Name(), cmds)
-	if err != nil {
-		return err
-	}
+	// it, err := b.run(e.Name(), cmds)
+	// if err != nil {
+	// 	return err
+	// }
 
-	it.stmt = &Stmt{stmt: oriCmd, replacer: b.db.dialect}
-	i, v := uint(1), reflect.Indirect(reflect.ValueOf(model))
-	vv := reflect.MakeSlice(v.Type(), 0, 0)
-	isPtr, t := checkMultiPtr(v)
-	for it.Next() {
-		if i > p.Limit {
-			continue
-		}
-		vi := reflect.New(t)
-		_, err = it.scan(vi.Interface())
-		if err != nil {
-			return err
-		}
-		cc, _ := it.Cursor()
-		p.nxtCursor = cc
-		if !isPtr {
-			vi = vi.Elem()
-		}
-		vv = reflect.Append(vv, vi)
-		i++
-	}
+	// it.stmt = &Stmt{stmt: oriCmd, replacer: b.db.dialect}
+	// i, v := uint(1), reflect.Indirect(reflect.ValueOf(model))
+	// vv := reflect.MakeSlice(v.Type(), 0, 0)
+	// isPtr, t := checkMultiPtr(v)
+	// for it.Next() {
+	// 	if i > p.Limit {
+	// 		continue
+	// 	}
+	// 	vi := reflect.New(t)
+	// 	_, err = it.scan(vi.Interface())
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	cc, _ := it.Cursor()
+	// 	p.nxtCursor = cc
+	// 	if !isPtr {
+	// 		vi = vi.Elem()
+	// 	}
+	// 	vv = reflect.Append(vv, vi)
+	// 	i++
+	// }
 
-	v.Set(vv)
-	count := it.Count()
-	if count <= p.Limit {
-		p.nxtCursor = Cursor{}
-	} else {
-		count--
-	}
-	p.count = count
+	// v.Set(vv)
+	// count := it.Count()
+	// if count <= p.Limit {
+	// 	p.nxtCursor = Cursor{}
+	// } else {
+	// 	count--
+	// }
+	// p.count = count
 	return nil
 }
 
 func (b *builder) replaceInto(table string) error {
-	buf, args := new(bytes.Buffer), make([]interface{}, 0)
+	buf, args := new(strings.Builder), make([]interface{}, 0)
 	buf.WriteString("REPLACE INTO ")
 	buf.WriteString(b.db.dialect.GetTable(table))
 	buf.WriteString(" ")
-	cmd := b.buildSelect(b.query)
-	buf.WriteString(cmd.string())
+	buf.WriteString(b.buildSelect(b.query).Raw())
 	buf.WriteString(" FROM " + b.db.dialect.GetTable(b.query.table))
-	cmd, err := b.buildWhere(b.query)
+	stmt, err := b.buildWhere(b.query)
 	if err != nil {
 		return err
 	}
-	if !cmd.isZero() {
-		buf.WriteString(cmd.string())
-		args = append(args, cmd.arguments...)
+	if !stmt.isZero() {
+		buf.WriteString(stmt.Raw())
+		args = append(args, stmt.Args()...)
 	}
 	buf.WriteString(";")
-	return b.db.client.execStmt(&stmt{
-		statement: buf,
-		arguments: args,
+	return b.db.client.ExecStmt(&Stmt{
+		query: buf,
+		args:  args,
 	})
 }
 
-func (b *builder) putStmt(parentKey []*datastore.Key, e *entity) (*stmt, error) {
+func (b *builder) putStmt(parentKey []*datastore.Key, e *entity) (*Stmt, error) {
 	v := e.slice.Elem()
 
 	isInline := (parentKey == nil && len(parentKey) == 0)
@@ -631,9 +636,12 @@ func (b *builder) putStmt(parentKey []*datastore.Key, e *entity) (*stmt, error) 
 	}
 
 	cols := e.Columns()
-	buf.WriteString(fmt.Sprintf("INSERT INTO %s (%s) VALUES ",
-		b.db.dialect.GetTable(e.Name()),
-		b.db.dialect.Quote(strings.Join(e.Columns(), b.db.dialect.Quote(",")))))
+	buf.WriteString("INSERT INTO ")
+	buf.WriteString(b.db.dialect.GetTable(e.Name()))
+	buf.WriteString(" (")
+	buf.WriteString(b.db.dialect.Quote(strings.Join(e.Columns(), b.db.dialect.Quote(","))))
+	buf.WriteString(") ")
+	buf.WriteString("VALUES ")
 
 	for i := 0; i < v.Len(); i++ {
 		f := reflect.Indirect(v.Index(i))
@@ -692,9 +700,9 @@ func (b *builder) putStmt(parentKey []*datastore.Key, e *entity) (*stmt, error) 
 	}
 	buf.WriteString(";")
 
-	return &stmt{
-		statement: buf,
-		arguments: args,
+	return &Stmt{
+		query: buf,
+		args:  args,
 	}, nil
 }
 
@@ -707,11 +715,11 @@ func (b *builder) put(model interface{}, parentKey []*datastore.Key) error {
 	if e.slice.Elem().Len() <= 0 {
 		return nil
 	}
-	cmd, err := b.putStmt(parentKey, e)
+	stmt, err := b.putStmt(parentKey, e)
 	if err != nil {
 		return err
 	}
-	return b.db.client.execStmt(cmd)
+	return b.db.client.ExecStmt(stmt)
 }
 
 func (b *builder) upsert(model interface{}, parentKey []*datastore.Key) error {
@@ -723,42 +731,45 @@ func (b *builder) upsert(model interface{}, parentKey []*datastore.Key) error {
 	if e.slice.Elem().Len() <= 0 {
 		return nil
 	}
-	cmd, err := b.putStmt(parentKey, e)
+	stmt, err := b.putStmt(parentKey, e)
 	if err != nil {
 		return err
 	}
 	cols := e.Columns()
 	omits := newDictionary(b.query.omits)
 	for i, c := range cols {
-		if !omits.has(c) || c == pkColumn || c == keyFieldName {
+		if !omits.has(c) {
 			continue
 		}
 		cols = append(cols[:i], cols[i+1:]...)
 	}
-	cmd.statement.Truncate(cmd.statement.Len() - 1)
 	buf := new(bytes.Buffer)
-	buf.WriteString(cmd.string())
+	buf.WriteString(stmt.Raw())
+	buf.Truncate(buf.Len() - 1)
 	if len(cols) > 0 {
 		buf.WriteString(" " + b.db.dialect.OnConflictUpdate(e.Name(), cols))
 	}
 	buf.WriteString(";")
-	cmd.statement = buf
-	return b.db.client.execStmt(cmd)
+	return b.db.client.ExecStmt(&Stmt{
+		query: buf,
+		args:  stmt.Args(),
+	})
 }
 
-func (b *builder) saveMutation(model interface{}) (*stmt, error) {
+func (b *builder) saveMutation(model interface{}) (*Stmt, error) {
 	v := reflect.Indirect(reflect.ValueOf(model))
 	if v.Len() <= 0 {
-		return new(stmt), nil
+		return new(Stmt), nil
 	}
 	e, err := newEntity(model)
 	if err != nil {
 		return nil, err
 	}
 	e.setName(b.query.table)
-	buf := new(bytes.Buffer)
-	args := make([]interface{}, 0)
-	buf.WriteString(fmt.Sprintf("UPDATE %s SET ", b.db.dialect.GetTable(e.Name())))
+	buf, args := new(bytes.Buffer), make([]interface{}, 0)
+	buf.WriteString("UPDATE ")
+	buf.WriteString(b.db.dialect.GetTable(e.Name()))
+	buf.WriteString(" SET ")
 	f := v.Index(0)
 	if x, isOk := f.Interface().(Saver); isOk {
 		if err := x.Save(); err != nil {
@@ -797,9 +808,9 @@ func (b *builder) saveMutation(model interface{}) (*stmt, error) {
 	buf.WriteString(fmt.Sprintf(" WHERE %s = %s;", b.db.dialect.Quote(pkColumn), variable))
 	args = append(args, stringPk(pk))
 
-	return &stmt{
-		statement: buf,
-		arguments: args,
+	return &Stmt{
+		query: buf,
+		args:  args,
 	}, nil
 }
 
@@ -812,21 +823,23 @@ func (b *builder) save(model interface{}) error {
 	vi.Index(0).Set(v)
 	vv := reflect.New(vi.Type())
 	vv.Elem().Set(vi)
-	cmd, err := b.saveMutation(vv.Interface())
+	stmt, err := b.saveMutation(vv.Interface())
 	if err != nil {
 		return err
 	}
-	if err := b.db.client.execStmt(cmd); err != nil {
+	if err := b.db.client.ExecStmt(stmt); err != nil {
 		return err
 	}
 	v.Elem().Set(vi.Index(0).Elem())
 	return nil
 }
 
-func (b *builder) updateWithMap(v reflect.Value) (*stmt, error) {
-	buf := new(bytes.Buffer)
-	args := make([]interface{}, 0)
-	for _, k := range v.MapKeys() {
+func (b *builder) updateWithMap(v reflect.Value) (*Stmt, error) {
+	buf, args := new(strings.Builder), make([]interface{}, 0)
+	for i, k := range v.MapKeys() {
+		if i > 0 {
+			buf.WriteString(",")
+		}
 		vv := v.MapIndex(k)
 		if k.Kind() != reflect.String {
 			return nil, fmt.Errorf("goloquent: invalid map key data type, %q", k.Kind())
@@ -835,7 +848,9 @@ func (b *builder) updateWithMap(v reflect.Value) (*stmt, error) {
 		if kk == keyFieldName {
 			return nil, fmt.Errorf("goloquent: update __key__ is not allow")
 		}
-		buf.WriteString(fmt.Sprintf(" %s = %s,", b.db.dialect.Quote(kk), variable))
+		buf.WriteString(b.db.dialect.Quote(kk))
+		buf.WriteString(" = ")
+		buf.WriteString(variable)
 		v, err := normalizeValue(vv.Interface())
 		if err != nil {
 			return nil, err
@@ -850,14 +865,14 @@ func (b *builder) updateWithMap(v reflect.Value) (*stmt, error) {
 		}
 		args = append(args, vi)
 	}
-	buf.Truncate(buf.Len() - 1)
-	return &stmt{
-		statement: buf,
-		arguments: args,
+
+	return &Stmt{
+		query: buf,
+		args:  args,
 	}, nil
 }
 
-func (b *builder) updateWithStruct(model interface{}) (*stmt, error) {
+func (b *builder) updateWithStruct(model interface{}) (*Stmt, error) {
 	vi := reflect.Indirect(reflect.ValueOf(model))
 	vv := reflect.New(vi.Type())
 	vv.Elem().Set(vi)
@@ -879,19 +894,21 @@ func (b *builder) updateWithStruct(model interface{}) (*stmt, error) {
 		if err != nil {
 			return nil, err
 		}
-		buf.WriteString(fmt.Sprintf("%s = %s,", b.db.dialect.Quote(p.Name()), variable))
+		buf.WriteString(b.db.dialect.Quote(p.Name()))
+		buf.WriteString(" = ")
+		buf.WriteString(variable)
+		buf.WriteString(",")
 		args = append(args, it)
 	}
 	buf.Truncate(buf.Len() - 1)
-	return &stmt{
-		statement: buf,
-		arguments: args,
+	return &Stmt{
+		query: buf,
+		args:  args,
 	}, nil
 }
 
 func (b *builder) updateMulti(v interface{}) error {
 	vi := reflect.Indirect(reflect.ValueOf(v))
-	buf, args := new(bytes.Buffer), make([]interface{}, 0)
 	table := b.query.table
 	if table == "" {
 		table = vi.Type().Name()
@@ -899,29 +916,34 @@ func (b *builder) updateMulti(v interface{}) error {
 	if table == "" {
 		return fmt.Errorf("goloquent: missing table name")
 	}
-	buf.WriteString(fmt.Sprintf("UPDATE %s SET", b.db.dialect.GetTable(table)))
+	buf, args := new(bytes.Buffer), make([]interface{}, 0)
+	buf.WriteString("UPDATE ")
+	buf.WriteString(b.db.dialect.GetTable(table))
+	buf.WriteString(" SET ")
 	switch vi.Type().Kind() {
 	case reflect.Map:
 		if vi.IsNil() || vi.Len() == 0 {
 			return nil
 		}
-		cmd, err := b.updateWithMap(vi)
+		stmt, err := b.updateWithMap(vi)
 		if err != nil {
 			return err
 		}
-		buf.WriteString(cmd.string())
-		args = append(args, cmd.arguments...)
+		buf.WriteString(stmt.Raw())
+		args = append(args, stmt.Args()...)
 	case reflect.Struct:
-		cmd, err := b.updateWithStruct(v)
+		stmt, err := b.updateWithStruct(v)
 		if err != nil {
 			return err
 		}
-		buf.WriteString(" " + cmd.string())
-		args = append(args, cmd.arguments...)
+		buf.WriteString(" ")
+		buf.WriteString(stmt.Raw())
+		args = append(args, stmt.Args()...)
 	default:
 		return fmt.Errorf("goloquent: unsupported data type %v on `Update`", vi.Type())
 	}
-	cmd, err := b.buildStmt(b.query)
+
+	stmt, err := b.buildStmt(b.query)
 	if err != nil {
 		return err
 	}
@@ -931,21 +953,21 @@ func (b *builder) updateMulti(v interface{}) error {
 		buf.WriteString(fmt.Sprintf("SELECT %s FROM %s",
 			b.db.dialect.Quote(pkColumn),
 			b.db.dialect.GetTable(table)))
-		buf.WriteString(cmd.string())
+		buf.WriteString(stmt.Raw())
 		buf.WriteString(")")
 	} else {
-		buf.WriteString(cmd.string())
+		buf.WriteString(stmt.Raw())
 	}
 	buf.WriteString(";")
-	return b.db.client.execStmt(&stmt{
-		statement: buf,
-		arguments: append(args, cmd.arguments...),
+	return b.db.client.ExecStmt(&Stmt{
+		query: buf,
+		args:  append(args, stmt.Args()...),
 	})
 }
 
-func (b *builder) concatKeys(e *entity) (*stmt, error) {
+func (b *builder) concatKeys(e *entity) (*Stmt, error) {
 	v := e.slice.Elem()
-	buf, args := new(bytes.Buffer), make([]interface{}, 0)
+	buf, args := new(strings.Builder), make([]interface{}, 0)
 	buf.WriteString("(")
 	for i := 0; i < v.Len(); i++ {
 		f := v.Index(i)
@@ -963,47 +985,55 @@ func (b *builder) concatKeys(e *entity) (*stmt, error) {
 		args = append(args, stringPk(kk))
 	}
 	buf.WriteString(")")
-	return &stmt{
-		statement: buf,
-		arguments: args,
+	return &Stmt{
+		query: buf,
+		args:  args,
 	}, nil
 }
 
-func (b *builder) softDeleteStmt(e *entity) (*stmt, error) {
-	buf, args := new(bytes.Buffer), make([]interface{}, 0)
-	buf.WriteString(fmt.Sprintf("UPDATE %s SET ", b.db.dialect.GetTable(e.Name())))
-	buf.WriteString(fmt.Sprintf("%s = %s WHERE %s IN ",
-		b.db.dialect.Quote(softDeleteColumn), variable, b.db.dialect.Quote(pkColumn)))
+func (b *builder) softDeleteStmt(e *entity) (*Stmt, error) {
+	buf, args := new(strings.Builder), make([]interface{}, 0)
+	buf.WriteString("UPDATE ")
+	buf.WriteString(b.db.dialect.GetTable(e.Name()))
+	buf.WriteString(" SET ")
+	buf.WriteString(b.db.dialect.Quote(softDeleteColumn))
+	buf.WriteString(" = ")
+	buf.WriteString(variable)
+	buf.WriteString(" WHERE ")
+	buf.WriteString(b.db.dialect.Quote(pkColumn))
+	buf.WriteString(" IN ")
 	args = append(args, time.Now().UTC().Format("2006-01-02 15:04:05"))
-	ss, err := b.concatKeys(e)
+	stmt, err := b.concatKeys(e)
 	if err != nil {
 		return nil, err
 	}
-	buf.WriteString(ss.string())
+	buf.WriteString(stmt.Raw())
 	buf.WriteString(";")
-	return &stmt{
-		statement: buf,
-		arguments: append(args, ss.arguments...),
+	return &Stmt{
+		query: buf,
+		args:  append(args, stmt.Args()...),
 	}, nil
 }
 
-func (b *builder) deleteStmt(e *entity, isSoftDelete bool) (*stmt, error) {
-	buf, args := new(bytes.Buffer), make([]interface{}, 0)
+func (b *builder) deleteStmt(e *entity, isSoftDelete bool) (*Stmt, error) {
+	buf, args := new(strings.Builder), make([]interface{}, 0)
 	if isSoftDelete && e.hasSoftDelete() {
 		return b.softDeleteStmt(e)
 	}
-	buf.WriteString(fmt.Sprintf("DELETE FROM %s WHERE %s IN ",
-		b.db.dialect.GetTable(e.Name()),
-		b.db.dialect.Quote(pkColumn)))
-	ss, err := b.concatKeys(e)
+	buf.WriteString("DELETE FROM ")
+	buf.WriteString(b.db.dialect.GetTable(e.Name()))
+	buf.WriteString(" WHERE ")
+	buf.WriteString(b.db.dialect.Quote(pkColumn))
+	buf.WriteString(" IN ")
+	stmt, err := b.concatKeys(e)
 	if err != nil {
 		return nil, err
 	}
-	buf.WriteString(ss.string())
+	buf.WriteString(stmt.Raw())
 	buf.WriteString(";")
-	return &stmt{
-		statement: buf,
-		arguments: append(args, ss.arguments...),
+	return &Stmt{
+		query: buf,
+		args:  append(args, stmt.Args()...),
 	}, nil
 }
 
@@ -1013,33 +1043,38 @@ func (b *builder) delete(model interface{}, isSoftDelete bool) error {
 		return err
 	}
 	e.setName(b.query.table)
-	cmd, err := b.deleteStmt(e, isSoftDelete)
+	stmt, err := b.deleteStmt(e, isSoftDelete)
 	if err != nil {
 		return err
 	}
-	return b.db.client.execStmt(cmd)
+	return b.db.client.ExecStmt(stmt)
 }
 
 func (b *builder) deleteByQuery() error {
 	query := b.query
-	cmd, err := b.buildStmt(query)
+	stmt, err := b.buildStmt(query)
 	if err != nil {
 		return err
 	}
-	buf := new(bytes.Buffer)
-	buf.WriteString(fmt.Sprintf("DELETE FROM %s", b.db.dialect.GetTable(query.table)))
-	buf.WriteString(cmd.string())
+	buf := new(strings.Builder)
+	buf.WriteString("DELETE FROM ")
+	buf.WriteString(b.db.dialect.GetTable(query.table))
+	buf.WriteString(stmt.Raw())
 	buf.WriteString(";")
-	cmd.statement = buf
-	return b.db.client.execStmt(cmd)
+	return b.db.client.ExecStmt(&Stmt{
+		query: buf,
+		args:  stmt.args,
+	})
 }
 
 func (b *builder) truncate(tables ...string) error {
-	for _, n := range tables {
-		buf := new(bytes.Buffer)
-		buf.WriteString(fmt.Sprintf("TRUNCATE TABLE %s;", b.db.dialect.GetTable(n)))
-		if err := b.db.client.execStmt(&stmt{
-			statement: buf,
+	for _, name := range tables {
+		buf := new(strings.Builder)
+		buf.WriteString("TRUNCATE TABLE ")
+		buf.WriteString(b.db.dialect.GetTable(name))
+		buf.WriteString(";")
+		if err := b.db.client.ExecStmt(&Stmt{
+			query: buf,
 		}); err != nil {
 			return err
 		}
@@ -1051,17 +1086,18 @@ func (b *builder) scan(dest ...interface{}) error {
 	query := b.query
 	table := query.table
 	buf := new(bytes.Buffer)
-	buf.WriteString(b.buildSelect(query).string())
-	buf.WriteString(fmt.Sprintf(" FROM %s", b.db.dialect.GetTable(table)))
-	ss, err := b.buildStmt(b.query)
+	buf.WriteString(b.buildSelect(query).Raw())
+	buf.WriteString(" FROM ")
+	buf.WriteString(b.db.dialect.GetTable(table))
+	stmt, err := b.buildStmt(b.query)
 	if err != nil {
 		return err
 	}
-	buf.WriteString(ss.string())
+	buf.WriteString(stmt.Raw())
 	buf.WriteString(";")
-	if err := b.db.client.execQueryRow(&stmt{
-		statement: buf,
-		arguments: ss.arguments,
+	if err := b.db.client.QueryRowStmt(&Stmt{
+		query: buf,
+		args:  stmt.Args(),
 	}).Scan(dest...); err != nil {
 		return fmt.Errorf("goloquent: %v", err)
 	}

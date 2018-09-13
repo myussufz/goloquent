@@ -140,7 +140,7 @@ func (s sequel) FilterJSON(f Filter) (string, []interface{}, error) {
 			x = append(x, vv)
 		}
 		if len(x) <= 0 {
-			return "", nil, fmt.Errorf(`goloquent: value for "In" operator cannot be empty`)
+			return "", nil, fmt.Errorf(`value for "In" operator cannot be empty`)
 		}
 		buf.WriteString("(")
 		for i := 0; i < len(x); i++ {
@@ -156,14 +156,14 @@ func (s sequel) FilterJSON(f Filter) (string, []interface{}, error) {
 			x = append(x, vv)
 		}
 		if len(x) <= 0 {
-			return "", nil, fmt.Errorf(`goloquent: value for "NotIn" operator cannot be empty`)
+			return "", nil, fmt.Errorf(`value for "NotIn" operator cannot be empty`)
 		}
 		buf.WriteString("(")
 		for i := 0; i < len(x); i++ {
 			buf.WriteString(fmt.Sprintf("%s <> %s AND ", name, variable))
 			args = append(args, s.JSONMarshal(x[i]))
 		}
-		buf.Truncate(buf.Len() - 4)
+		buf.Truncate(buf.Len() - 5)
 		buf.WriteString(")")
 		return buf.String(), args, nil
 	case ContainAny:
@@ -172,7 +172,7 @@ func (s sequel) FilterJSON(f Filter) (string, []interface{}, error) {
 			x = append(x, vv)
 		}
 		if len(x) <= 0 {
-			return "", nil, fmt.Errorf(`goloquent: value for "ContainAny" operator cannot be empty`)
+			return "", nil, fmt.Errorf(`value for "ContainAny" operator cannot be empty`)
 		}
 		buf.WriteString("(")
 		for i := 0; i < len(x); i++ {
@@ -264,7 +264,7 @@ func (s *sequel) ToString(it interface{}) string {
 }
 
 // GetSchema :
-func (s *sequel) GetSchema(c Column) []Schema {
+func (s *sequel) GetSchema(c Column) Schema {
 	f := c.field
 	root := f.getRoot()
 	t := root.typeOf
@@ -290,7 +290,7 @@ func (s *sequel) GetSchema(c Column) []Schema {
 				sc.DefaultValue = OmitDefault(nil)
 				sc.IsIndexed = false
 			}
-			return []Schema{sc}
+			return sc
 		}
 		t = t.Elem()
 	}
@@ -385,7 +385,7 @@ func (s *sequel) GetSchema(c Column) []Schema {
 		}
 	}
 
-	return []Schema{sc}
+	return sc
 }
 
 // GetColumns :

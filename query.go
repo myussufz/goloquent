@@ -132,6 +132,13 @@ func (q *Query) getError() error {
 	return nil
 }
 
+// Debug :
+// func (q *Query) Debug() *Query {
+// 	q = q.clone()
+// 	q.isDebug = true
+// 	return q
+// }
+
 // Select :
 func (q *Query) Select(fields ...string) *Query {
 	q = q.clone()
@@ -440,12 +447,24 @@ func (q *Query) WhereJSONNotEqual(field string, v interface{}) *Query {
 }
 
 // WhereJSONIn :
-func (q *Query) WhereJSONIn(field string, v []interface{}) *Query {
+func (q *Query) WhereJSONIn(field string, v interface{}) *Query {
+	vv := reflect.Indirect(reflect.ValueOf(v))
+	t := vv.Type()
+	if !vv.IsValid() || (t.Kind() != reflect.Slice && t.Kind() != reflect.Array) {
+		q.errs = append(q.errs, fmt.Errorf(`goloquent: value must be either slice or array for "WhereJSONIn"`))
+		return q
+	}
 	return q.WhereJSON(field, "in", v)
 }
 
 // WhereJSONNotIn :
-func (q *Query) WhereJSONNotIn(field string, v []interface{}) *Query {
+func (q *Query) WhereJSONNotIn(field string, v interface{}) *Query {
+	vv := reflect.Indirect(reflect.ValueOf(v))
+	t := vv.Type()
+	if !vv.IsValid() || (t.Kind() != reflect.Slice && t.Kind() != reflect.Array) {
+		q.errs = append(q.errs, fmt.Errorf(`goloquent: value must be either slice or array for "WhereJSONNotIn"`))
+		return q
+	}
 	return q.WhereJSON(field, "nin", v)
 }
 

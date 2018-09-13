@@ -1,6 +1,7 @@
 package test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -285,18 +286,44 @@ func TestMySQLJSONRawMessage(t *testing.T) {
 	if err := my.Upsert(u); err != nil {
 		t.Fatal(err)
 	}
-	u.Information = json.RawMessage(`[]`)
+
+	u2 := new(User)
+	bb := json.RawMessage(`[]`)
+	u.Information = bb
 	if err := my.Upsert(u); err != nil {
 		t.Fatal(err)
 	}
-	u.Information = json.RawMessage(`{}`)
+	if err := my.Find(u.Key, u2); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(bb, u2.Information) {
+		t.Fatal("unexpected result")
+	}
+
+	bb = json.RawMessage(`{}`)
+	u.Information = bb
 	if err := my.Upsert(u); err != nil {
 		t.Fatal(err)
 	}
-	u.Information = json.RawMessage(`null`)
+	if err := my.Find(u.Key, u2); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(bb, u2.Information) {
+		t.Fatal("unexpected result")
+	}
+
+	bb = json.RawMessage(`null`)
+	u.Information = bb
 	if err := my.Upsert(u); err != nil {
 		t.Fatal(err)
 	}
+	if err := my.Find(u.Key, u2); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(bb, u2.Information) {
+		t.Fatal("unexpected result")
+	}
+
 	u.Information = json.RawMessage(`notvalid`)
 	if err := my.Upsert(u); err == nil {
 		t.Fatal(err)
@@ -481,82 +508,82 @@ func TestMySQLJSONIsArray(t *testing.T) {
 	}
 }
 
-func TestMySQLPaginate(t *testing.T) {
-	users := new([]User)
-	p := &goloquent.Pagination{
-		Limit: 1,
-	}
-	if err := my.Paginate(p, users); err != nil {
-		t.Fatal(err)
-	}
-	if len(*(users)) <= 0 {
-		t.Fatal(fmt.Errorf("paginate record set shouldn't empty"))
-	}
+// func TestMySQLPaginate(t *testing.T) {
+// 	users := new([]User)
+// 	p := &goloquent.Pagination{
+// 		Limit: 1,
+// 	}
+// 	if err := my.Paginate(p, users); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	if len(*(users)) <= 0 {
+// 		t.Fatal(fmt.Errorf("paginate record set shouldn't empty"))
+// 	}
 
-	p.Cursor = p.NextCursor()
-	if err := my.Paginate(p, users); err != nil {
-		t.Fatal(err)
-	}
-	if len(*(users)) <= 0 {
-		t.Fatal(fmt.Errorf("paginate record set shouldn't empty"))
-	}
+// 	p.Cursor = p.NextCursor()
+// 	if err := my.Paginate(p, users); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	if len(*(users)) <= 0 {
+// 		t.Fatal(fmt.Errorf("paginate record set shouldn't empty"))
+// 	}
 
-	p2 := &goloquent.Pagination{
-		Limit: 1,
-	}
-	if err := my.Ancestor(nameKey).
-		Paginate(p2, users); err != nil {
-		t.Fatal(err)
-	}
-	if len(*(users)) <= 0 {
-		t.Fatal(fmt.Errorf("paginate record set shouldn't empty"))
-	}
+// 	p2 := &goloquent.Pagination{
+// 		Limit: 1,
+// 	}
+// 	if err := my.Ancestor(nameKey).
+// 		Paginate(p2, users); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	if len(*(users)) <= 0 {
+// 		t.Fatal(fmt.Errorf("paginate record set shouldn't empty"))
+// 	}
 
-	p2.Cursor = p.NextCursor()
-	if err := my.Paginate(p2, users); err != nil {
-		t.Fatal(err)
-	}
-	if len(*(users)) <= 0 {
-		t.Fatal(fmt.Errorf("paginate record set shouldn't empty"))
-	}
-}
+// 	p2.Cursor = p.NextCursor()
+// 	if err := my.Paginate(p2, users); err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	if len(*(users)) <= 0 {
+// 		t.Fatal(fmt.Errorf("paginate record set shouldn't empty"))
+// 	}
+// }
 
-func TestMySQLUpsert(t *testing.T) {
-	u := getFakeUser()
-	if err := my.Upsert(u); err != nil {
-		t.Fatal(err)
-	}
+// func TestMySQLUpsert(t *testing.T) {
+// 	u := getFakeUser()
+// 	if err := my.Upsert(u); err != nil {
+// 		t.Fatal(err)
+// 	}
 
-	u = getFakeUser()
-	if err := my.Upsert(u, idKey); err != nil {
-		t.Fatal(err)
-	}
+// 	u = getFakeUser()
+// 	if err := my.Upsert(u, idKey); err != nil {
+// 		t.Fatal(err)
+// 	}
 
-	u = getFakeUser()
-	if err := my.Upsert(u, nameKey); err != nil {
-		t.Fatal(err)
-	}
+// 	u = getFakeUser()
+// 	if err := my.Upsert(u, nameKey); err != nil {
+// 		t.Fatal(err)
+// 	}
 
-	users := []*User{getFakeUser(), getFakeUser()}
-	if err := my.Upsert(&users); err != nil {
-		t.Fatal(err)
-	}
+// 	users := []*User{getFakeUser(), getFakeUser()}
+// 	if err := my.Upsert(&users); err != nil {
+// 		t.Fatal(err)
+// 	}
 
-	uu := []User{*getFakeUser(), *getFakeUser()}
-	if err := my.Upsert(&uu); err != nil {
-		t.Fatal(err)
-	}
+// 	uu := []User{*getFakeUser(), *getFakeUser()}
+// 	if err := my.Upsert(&uu); err != nil {
+// 		t.Fatal(err)
+// 	}
 
-	uuu := []User{*getFakeUser(), *getFakeUser()}
-	if err := my.Upsert(&uuu, idKey); err != nil {
-		t.Fatal(err)
-	}
+// 	uuu := []User{*getFakeUser(), *getFakeUser()}
+// 	if err := my.Upsert(&uuu, idKey); err != nil {
+// 		t.Fatal(err)
+// 	}
 
-	uuu = []User{*getFakeUser(), *getFakeUser()}
-	if err := my.Upsert(&uuu, nameKey); err != nil {
-		t.Fatal(err)
-	}
-}
+// 	uuu = []User{*getFakeUser(), *getFakeUser()}
+// 	if err := my.Upsert(&uuu, nameKey); err != nil {
+// 		t.Fatal(err)
+// 	}
+// }
 
 func TestMySQLUpdate(t *testing.T) {
 	if err := my.Table("User").Limit(1).
@@ -582,6 +609,7 @@ func TestMySQLUpdate(t *testing.T) {
 	// 	t.Fatal(err)
 	// }
 }
+
 func TestMySQLSoftDelete(t *testing.T) {
 	u := getFakeUser()
 	if err := my.Create(u); err != nil {
