@@ -21,6 +21,7 @@ type Config struct {
 	Port       string
 	Database   string
 	UnixSocket string
+	IsDebug    bool
 	CharSet    *goloquent.CharSet
 	Logger     goloquent.LogHandler
 }
@@ -43,6 +44,7 @@ func Open(driver string, conf Config) (*goloquent.DB, error) {
 		Port:       conf.Port,
 		Database:   conf.Database,
 		UnixSocket: conf.UnixSocket,
+		IsDebug:    conf.IsDebug,
 		CharSet:    conf.CharSet,
 		Logger:     conf.Logger,
 	}

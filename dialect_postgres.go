@@ -150,7 +150,7 @@ func (p postgres) FilterJSON(f Filter) (string, []interface{}, error) {
 			buf.WriteString(fmt.Sprintf("(%s <> %s) AND ", name, variable))
 			args = append(args, p.JSONMarshal(x[i]))
 		}
-		buf.Truncate(buf.Len() - 4)
+		buf.Truncate(buf.Len() - 5)
 		buf.WriteString(")")
 		return buf.String(), args, nil
 	case ContainAny:
@@ -174,11 +174,11 @@ func (p postgres) FilterJSON(f Filter) (string, []interface{}, error) {
 		buf.WriteString(fmt.Sprintf("jsonb_typeof((%s)::jsonb) = LOWER(%s)", name, variable))
 		return buf.String(), args, nil
 	case IsObject:
-		vv = json.RawMessage([]byte("{}"))
-		buf.WriteString(fmt.Sprintf("(%s)::jsonb @> %s::jsonb", name, variable))
+		buf.WriteString(fmt.Sprintf("(%s)::jsonb @> '{}'::jsonb", name))
+		return buf.String(), args, nil
 	case IsArray:
-		vv = json.RawMessage([]byte("[]"))
-		buf.WriteString(fmt.Sprintf("(%s)::jsonb @> %s::jsonb", name, variable))
+		buf.WriteString(fmt.Sprintf("(%s)::jsonb @> '[]'::jsonb", name))
+		return buf.String(), args, nil
 	default:
 		return "", nil, fmt.Errorf("unsupported operator")
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"regexp"
 	"strings"
 	"time"
 
@@ -40,6 +41,7 @@ type Config struct {
 	Port       string
 	Database   string
 	UnixSocket string
+	IsDebug    bool
 	CharSet    *CharSet
 	Logger     LogHandler
 }
@@ -68,19 +70,40 @@ type Replacer interface {
 
 // Client :
 type Client struct {
+	driver string
 	sqlCommon
 	CharSet
 	dialect Dialect
 	logger  LogHandler
 }
 
-func (c Client) consoleLog(s *Stmt) {
+func (c *Client) compileStmt(query string) string {
+	replace := func(i int) string {
+		return "?"
+	}
+
+	switch c.driver {
+	case "postgres":
+		replace = func(i int) string {
+			return fmt.Sprintf("$%d", i)
+		}
+	}
+
+	var j int
+	re, _ := regexp.Compile(`\?|\$\d+`)
+	return re.ReplaceAllStringFunc(query, func(_ string) string {
+		j++
+		return replace(j)
+	})
+}
+
+func (c *Client) consoleLog(s *Stmt) {
 	if c.logger != nil {
 		c.logger(s)
 	}
 }
 
-func (c Client) prepareExec(query string, args ...interface{}) (sql.Result, error) {
+func (c *Client) prepareExec(query string, args ...interface{}) (sql.Result, error) {
 	conn, err := c.sqlCommon.Prepare(query)
 	if err != nil {
 		return nil, fmt.Errorf("goloquent: unable to prepare sql statement : %v", err)
@@ -94,30 +117,32 @@ func (c Client) prepareExec(query string, args ...interface{}) (sql.Result, erro
 }
 
 // ExecStmt :
-func (c Client) ExecStmt(s *Stmt) error {
-	s.startTrace()
+func (c *Client) ExecStmt(stmt *Stmt) error {
+	stmt.startTrace()
 	defer func() {
-		s.stopTrace()
-		//c.consoleLog(s)
+		stmt.stopTrace()
+		// c.consoleLog(s)
 	}()
-	log.Println(s.Raw())
-	result, err := c.prepareExec(s.Raw(), s.Args()...)
+	query := c.compileStmt(stmt.Raw())
+	log.Println(query)
+	result, err := c.prepareExec(query, stmt.Args()...)
 	if err != nil {
 		return err
 	}
-	s.Result = result
+	stmt.Result = result
 	return nil
 }
 
 // QueryStmt :
-func (c Client) QueryStmt(stmt *Stmt) (*sql.Rows, error) {
+func (c *Client) QueryStmt(stmt *Stmt) (*sql.Rows, error) {
 	stmt.startTrace()
 	defer func() {
 		stmt.stopTrace()
 		// c.consoleLog(ss)
 	}()
-	log.Println(stmt.Raw())
-	var rows, err = c.Query(stmt.Raw(), stmt.Args()...)
+	query := c.compileStmt(stmt.Raw())
+	log.Println(query)
+	var rows, err = c.Query(query, stmt.Args()...)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +161,7 @@ func (c *Client) QueryRowStmt(stmt *Stmt) *sql.Row {
 }
 
 // Exec :
-func (c Client) Exec(query string, args ...interface{}) (sql.Result, error) {
+func (c *Client) Exec(query string, args ...interface{}) (sql.Result, error) {
 	result, err := c.sqlCommon.Exec(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("goloquent: %v", err)
@@ -145,7 +170,7 @@ func (c Client) Exec(query string, args ...interface{}) (sql.Result, error) {
 }
 
 // Query :
-func (c Client) Query(query string, args ...interface{}) (*sql.Rows, error) {
+func (c *Client) Query(query string, args ...interface{}) (*sql.Rows, error) {
 	rows, err := c.sqlCommon.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("goloquent: %v", err)
@@ -154,7 +179,7 @@ func (c Client) Query(query string, args ...interface{}) (*sql.Rows, error) {
 }
 
 // QueryRow :
-func (c Client) QueryRow(query string, args ...interface{}) *sql.Row {
+func (c *Client) QueryRow(query string, args ...interface{}) *sql.Row {
 	return c.sqlCommon.QueryRow(query, args...)
 }
 
@@ -171,7 +196,13 @@ type DB struct {
 
 // NewDB :
 func NewDB(driver string, charset CharSet, conn sqlCommon, dialect Dialect, logHandler LogHandler) *DB {
-	client := Client{conn, charset, dialect, logHandler}
+	client := Client{
+		driver:    driver,
+		sqlCommon: conn,
+		CharSet:   charset,
+		dialect:   dialect,
+		logger:    logHandler,
+	}
 	dialect.SetDB(client)
 	return &DB{
 		id:      fmt.Sprintf("%s:%d", driver, time.Now().UnixNano()),

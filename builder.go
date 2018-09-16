@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
 	"reflect"
 	"regexp"
 	"strings"
@@ -485,119 +486,120 @@ func baseToInterface(it interface{}) interface{} {
 }
 
 func (b *builder) paginate(p *Pagination, model interface{}) error {
-	// e, err := newEntity(model)
-	// if err != nil {
-	// 	return err
-	// }
-	// e.setName(b.query.table)
-	// cmds, err := b.getStmt(e)
-	// if err != nil {
-	// 	return err
-	// }
+	e, err := newEntity(model)
+	if err != nil {
+		return err
+	}
+	e.setName(b.query.table)
+	stmt, err := b.getStmt(e)
+	if err != nil {
+		return err
+	}
 
+	log.Println(stmt.Raw())
 	// oriCmd := *cmds
-	// if p.Cursor != "" {
-	// 	c, err := DecodeCursor(p.Cursor)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	if sha1Sign(&Stmt{replacer: b.db.dialect}) != c.Signature {
-	// 		return ErrInvalidCursor
-	// 	}
-	// 	query := b.query
-	// 	buf, args := new(bytes.Buffer), make([]interface{}, 0)
-	// 	buf.WriteString(b.buildSelect(query).Raw())
-	// 	buf.WriteString(" FROM ")
-	// 	buf.WriteString(b.db.dialect.GetTable(e.Name()))
-	// 	cmd, err := b.buildWhere(query)
-	// 	if err != nil {
-	// 		return err
-	// 	}
+	if p.Cursor != "" {
+		// 	c, err := DecodeCursor(p.Cursor)
+		// 	if err != nil {
+		// 		return err
+		// 	}
+		// 	if sha1Sign(&Stmt{replacer: b.db.dialect}) != c.Signature {
+		// 		return ErrInvalidCursor
+		// 	}
+		// 	query := b.query
+		// 	buf, args := new(bytes.Buffer), make([]interface{}, 0)
+		// 	buf.WriteString(b.buildSelect(query).Raw())
+		// 	buf.WriteString(" FROM ")
+		// 	buf.WriteString(b.db.dialect.GetTable(e.Name()))
+		// 	cmd, err := b.buildWhere(query)
+		// 	if err != nil {
+		// 		return err
+		// 	}
 
-	// 	orders := query.orders
-	// 	projection := make([]string, 0, len(orders))
-	// 	for _, o := range orders {
-	// 		projection = append(projection, o.field)
-	// 	}
-	// 	values, or := make([]interface{}, len(orders)), make([]string, 0)
-	// 	for i := 0; i < len(values); i++ {
-	// 		values[i] = &values[i]
-	// 	}
-	// 	if !cmd.isZero() {
-	// 		args = append(args, cmd.Args()...)
-	// 		buf.WriteString(cmd.Raw())
-	// 		buf.WriteString(" AND ")
-	// 	} else {
-	// 		if len(orders) > 0 {
-	// 			buf.WriteString(" WHERE ")
-	// 		}
-	// 	}
-	// 	if err := b.db.Table(e.Name()).
-	// 		WhereEqual(keyFieldName, c.Key).
-	// 		Select(projection...).
-	// 		Limit(1).Scan(values...); err != nil {
-	// 		return ErrInvalidCursor
-	// 	}
-	// 	arg := make([]interface{}, 0, len(orders))
-	// 	for i, o := range orders {
-	// 		vv := baseToInterface(values[i])
-	// 		op := ">="
-	// 		if o.direction == descending {
-	// 			op = "<="
-	// 		}
-	// 		if i < len(orders)-1 {
-	// 			buf.WriteString(fmt.Sprintf("%s %s %s AND ",
-	// 				b.db.dialect.Quote(o.field), op, variable))
-	// 			args = append(args, vv)
-	// 			op = strings.Trim(op, "=")
-	// 		}
-	// 		or = append(or, fmt.Sprintf("%s %s %s",
-	// 			b.db.dialect.Quote(o.field), op, variable))
-	// 		arg = append(arg, vv)
-	// 	}
-	// 	buf.WriteString("(" + strings.Join(or, " OR ") + ")")
-	// 	args = append(args, arg...)
-	// 	buf.WriteString(b.buildOrder(query).Raw())
-	// 	buf.WriteString(b.buildLimitOffset(query).Raw())
-	// 	buf.WriteString(";")
-	// 	// cmds = &stmt{statement: buf, arguments: args}
-	// }
+		// 	orders := query.orders
+		// 	projection := make([]string, 0, len(orders))
+		// 	for _, o := range orders {
+		// 		projection = append(projection, o.field)
+		// 	}
+		// 	values, or := make([]interface{}, len(orders)), make([]string, 0)
+		// 	for i := 0; i < len(values); i++ {
+		// 		values[i] = &values[i]
+		// 	}
+		// 	if !cmd.isZero() {
+		// 		args = append(args, cmd.Args()...)
+		// 		buf.WriteString(cmd.Raw())
+		// 		buf.WriteString(" AND ")
+		// 	} else {
+		// 		if len(orders) > 0 {
+		// 			buf.WriteString(" WHERE ")
+		// 		}
+		// 	}
+		// 	if err := b.db.Table(e.Name()).
+		// 		WhereEqual(keyFieldName, c.Key).
+		// 		Select(projection...).
+		// 		Limit(1).Scan(values...); err != nil {
+		// 		return ErrInvalidCursor
+		// 	}
+		// 	arg := make([]interface{}, 0, len(orders))
+		// 	for i, o := range orders {
+		// 		vv := baseToInterface(values[i])
+		// 		op := ">="
+		// 		if o.direction == descending {
+		// 			op = "<="
+		// 		}
+		// 		if i < len(orders)-1 {
+		// 			buf.WriteString(fmt.Sprintf("%s %s %s AND ",
+		// 				b.db.dialect.Quote(o.field), op, variable))
+		// 			args = append(args, vv)
+		// 			op = strings.Trim(op, "=")
+		// 		}
+		// 		or = append(or, fmt.Sprintf("%s %s %s",
+		// 			b.db.dialect.Quote(o.field), op, variable))
+		// 		arg = append(arg, vv)
+		// 	}
+		// 	buf.WriteString("(" + strings.Join(or, " OR ") + ")")
+		// 	args = append(args, arg...)
+		// 	buf.WriteString(b.buildOrder(query).Raw())
+		// 	buf.WriteString(b.buildLimitOffset(query).Raw())
+		// 	buf.WriteString(";")
+		// 	// cmds = &stmt{statement: buf, arguments: args}
+	}
 
-	// it, err := b.run(e.Name(), cmds)
-	// if err != nil {
-	// 	return err
-	// }
+	it, err := b.run(e.Name(), stmt)
+	if err != nil {
+		return err
+	}
 
 	// it.stmt = &Stmt{stmt: oriCmd, replacer: b.db.dialect}
-	// i, v := uint(1), reflect.Indirect(reflect.ValueOf(model))
-	// vv := reflect.MakeSlice(v.Type(), 0, 0)
-	// isPtr, t := checkMultiPtr(v)
-	// for it.Next() {
-	// 	if i > p.Limit {
-	// 		continue
-	// 	}
-	// 	vi := reflect.New(t)
-	// 	_, err = it.scan(vi.Interface())
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	cc, _ := it.Cursor()
-	// 	p.nxtCursor = cc
-	// 	if !isPtr {
-	// 		vi = vi.Elem()
-	// 	}
-	// 	vv = reflect.Append(vv, vi)
-	// 	i++
-	// }
+	i, v := uint(1), reflect.Indirect(reflect.ValueOf(model))
+	vv := reflect.MakeSlice(v.Type(), 0, 0)
+	isPtr, t := checkMultiPtr(v)
+	for it.Next() {
+		if i > p.Limit {
+			continue
+		}
+		vi := reflect.New(t)
+		_, err = it.scan(vi.Interface())
+		if err != nil {
+			return err
+		}
+		cc, _ := it.Cursor()
+		p.nxtCursor = cc
+		if !isPtr {
+			vi = vi.Elem()
+		}
+		vv = reflect.Append(vv, vi)
+		i++
+	}
 
-	// v.Set(vv)
-	// count := it.Count()
-	// if count <= p.Limit {
-	// 	p.nxtCursor = Cursor{}
-	// } else {
-	// 	count--
-	// }
-	// p.count = count
+	v.Set(vv)
+	count := it.Count()
+	if count <= p.Limit {
+		p.nxtCursor = Cursor{}
+	} else {
+		count--
+	}
+	p.count = count
 	return nil
 }
 

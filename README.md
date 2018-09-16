@@ -2,8 +2,6 @@
 
 Inspired by Laravel Eloquent and Google Cloud Datastore
 
-This repo still under development. We accept any pull request. ^\_^
-
 ## Database Support
 
 - [x] MySQL (version 5.7 and above)

@@ -33,6 +33,7 @@
 - (2018-09-06) Fix incorrect mysql schema for signed and unsigned integer data type.
   <!-- - (2018-09-10) Fix `Upsert` bug. Primary key should omitted. -->
 - (2018-09-10) Fix `postgres` schema bug. Schema for unsigned integer should be greater and equal to zero instead of greater than zero. `CHECK (value >= 0)`.
+- (2018-09-13) Fix `newPrimaryKey` logic error. ID key with 0 shouldn't nested again.
 
 # Breaking Changes
 
@@ -42,22 +43,22 @@
 - Drop `SetDebug(boolean)` api.
 - Drop `datastore` driver support.
 - `Delete` api using entity model instead of `*datastore.Key`.
-- Rename params in function `RunInTransaction` from `*goloquent.Connection` to `*goloquent.DB`
+- Rename params in function `RunInTransaction` from `*goloquent.Connection` to `*goloquent.DB`.
 - Rename api `LockForUpdate` to `WLock`.
 - Rename api `LockForShared` to `RLock`.
 - Change single entity api `Update` to `Save`.
 - Change `Loader` interface `Load([]datastore.Property) error` to `Load() error`
 - Change `Saver` interface `Save() ([]datastore.Property,error)` to `Save() error`
 - Change second parameter **parentKey** `*datastore.Key` to optional on function `Create` nor `Upsert`
-- (2018-06-16) No longer support mysql 5.6 and below (at least 5.7)
-- (2018-06-19) Table is now by default using `utf8mb4` encoding
-- (2018-06-20) Replace `Next` func in `Pagination` struct with `NextCursor`
-- (2018-06-21) Support extra option `datatype`, `charset`, `collate` on struct property, but it only limited to datatype of `string`
+- (2018-06-16) No longer support mysql 5.6 and below (at least 5.7).
+- (2018-06-19) Table is now by default using `utf8mb4` encoding.
+- (2018-06-20) Replace `Next` func in `Pagination` struct with `NextCursor`.
+- (2018-06-21) Support extra option `datatype`, `charset`, `collate` on struct property, but it only limited to datatype of `string`.
 - (2018-06-21) Allow `*` on api `Select`.
 - (2018-06-24) Replace offset pagination with cursor pagination
 - (2018-07-05) Rename api `WhereNe` to `WhereNotEqual`.
 - (2018-07-08) Rename api `WhereEq` to `WhereEqual`.
-- (2018-07-08) Replace return parameter `Query` to `Table` on func `Table` of `goloquent.DB`.
+- (2018-07-08) Replace return parameter `Query` to `Table` on api `Table` of `goloquent.DB`.
 - (2018-07-17) Expose operator to public.
 - (2018-08-24) Change `AnyOfAncestor` api parameter data type `[]*datastore.Key` to `...*datastore.Key`.
 - (2018-08-24) Change `Truncate` api to support multiple entity.
@@ -65,6 +66,7 @@
 - (2018-09-02) Change api `WhereIn` and `WhereNotIn` value param from `[]interface{}` to `interface{}`.
 - (2018-09-10) `Date` no longer convert to UTC before format.
 - (2018-09-10) `Date` will have default value `"0001-01-01"` if it's not pointer.
+- (2018-09-13) Name key will escape using `url.PathEscape` to avoid misinterpret when it contains symbol characters.
 
 # New Features
 
@@ -74,7 +76,7 @@
 - Introduce `Truncate` api.
 - Introduce `Flush` api.
 - Introduce package `db`.
-- Introduce package `qson`. (Query JSON)
+- Introduce package `qson`. (Query JSON).
 - Replace statement debug using `LogHandler`.
 - Support unsigned integer, uint, uint8, uint16, uint32, uint64
 - Support any pointer of base data type and struct
@@ -84,7 +86,7 @@
 - (2018-06-24) Introduce `Unscoped` api.
 - (2018-07-05) Support **JSON** filter.
 - (2018-07-05) Introduce `WhereJSONEqual` api.
-- (2018-07-08) Introduce new struct `Table` with new api, such as `Exists`, `DropIfExists`, `Truncate`, `AddIndex`, `AddUniqueIndex`
+- (2018-07-08) Introduce new struct `Table` with new api, such as `Exists`, `DropIfExists`, `Truncate`, `AddIndex`, `AddUniqueIndex`.
 - (2018-07-08) Introduce new data type `Date`.
 - (2018-07-17) Enhance data type `Date`, add func `MarshalText` and `UnmarshalText`.
 - (2018-07-18) Introduce JSON filtering api `WhereJSON`, `WhereJSONNotEqual`, `WhereJSONIn`, `WhereNotIn`, `WhereJSONContainAny`, `WhereJSONType`, `WhereJSONIsObject`, `WhereJSONIsArray`

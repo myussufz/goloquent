@@ -60,27 +60,9 @@ func (s Stmt) TimeElapse() time.Duration {
 }
 
 // Raw :
-func (s *Stmt) Raw() string {
+func (s Stmt) Raw() string {
 	return s.query.String()
 }
-
-// Raw :
-// func (s *Stmt) Raw() string {
-// 	buf := new(bytes.Buffer)
-// 	if len(s.arguments) <= 0 {
-// 		return s.string()
-// 	}
-// 	arr := strings.Split(s.string(), variable)
-// 	for i := 0; i < len(arr); i++ {
-// 		str := arr[i] + s.replacer.Bind(uint(i+1))
-// 		if i >= len(arr)-1 {
-// 			str = arr[i]
-// 		}
-// 		buf.WriteString(str)
-// 	}
-// 	return buf.String()
-// 	return buf.String()
-// }
 
 // String :
 func (s *Stmt) String() string {
